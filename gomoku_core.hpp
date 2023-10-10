@@ -3,7 +3,7 @@
 #include "common.hpp"
 
 /// A stone on the board.
-enum struct Stone { None = 0, Black = 1, White = 2 };
+enum struct Stone : u8 { None = 0, Black = 1, White = 2 };
 
 /// Returns the opposite stone.
 constexpr Stone opposite(Stone stone) {
@@ -57,21 +57,26 @@ const usize BOARD_SIZE = 15;
 
 // Inspired by `RawVec` in Rust.
 class RawBoard {
-    std::unique_ptr<Stone[]> mat;
+    vector<Stone> mat{BOARD_SIZE * BOARD_SIZE};
 
   public:
-    RawBoard() : mat(new Stone[BOARD_SIZE * BOARD_SIZE]()) {}
-
     /// Checks if the board contains a point.
     bool contains_point(Point p) const {
         return p.x < BOARD_SIZE && p.y < BOARD_SIZE;
     }
 
     /// Returns a reference to the stone at the point.
-    Stone &at(Point p) const {
-        if (p.x >= BOARD_SIZE || p.y >= BOARD_SIZE)
+    Stone &at(Point p) {
+        if (!contains_point(p))
             throw std::out_of_range("point out of board");
-        return mat[p.y * BOARD_SIZE + p.x];
+        return mat.at(p.y * BOARD_SIZE + p.x);
+    }
+
+    /// Returns a const reference to the stone at the point.
+    const Stone &at(Point p) const {
+        if (!contains_point(p))
+            throw std::out_of_range("point out of board");
+        return mat.at(p.y * BOARD_SIZE + p.x);
     }
 
     /// Sets the stone at a point.
@@ -92,9 +97,7 @@ struct Row {
 };
 
 struct Win {
-    size_t index;
-    Point pos;
-    Axis axis;
+    usize index;
     Row row;
 };
 
@@ -126,7 +129,7 @@ class Board {
     /// Gets the stone at a point.
     Stone get(Point p) const { return board.at(p); }
 
-    /// Sets the stone at a point.
+    /// Sets the stone at a point, clearing moves in the future.
     bool set(Point p, Stone stone) {
         Stone &val = board.at(p);
         if (val != Stone::None)
@@ -138,36 +141,36 @@ class Board {
         idx += 1;
 
         if (!win || win->index >= idx) {
-            auto res = check_win(p);
-            if (res)
-                win = {idx, p, res->first, res->second};
+            auto win_row = find_win_row(p);
+            if (win_row)
+                win = {idx, *win_row};
             else
                 win = nullopt;
         }
         return true;
     }
 
-    /// Unsets the last stone (if any).
+    /// Unsets the last move (if any).
     bool unset() {
         if (idx == 0)
             return false;
         idx -= 1;
-        auto last = moves[idx];
+        Move last = moves.at(idx);
         board.unset(last.pos);
         return true;
     }
 
-    /// Resets the next stone (if any).
+    /// Resets the next move (if any).
     bool reset() {
         if (idx >= total())
             return false;
-        auto next = moves[idx];
+        Move next = moves.at(idx);
         idx += 1;
         board.set(next.pos, next.stone);
         return true;
     }
 
-    /// Jumps to the given index by unsetting or resetting stones.
+    /// Jumps to the given index by unsetting or resetting moves.
     bool jump(usize to_index) {
         if (to_index > total())
             throw std::out_of_range("index out of range");
@@ -175,12 +178,12 @@ class Board {
             return false;
         if (idx < to_index) {
             for (usize i = idx; i < to_index; i++) {
-                auto next = moves[i];
+                Move next = moves.at(i);
                 board.set(next.pos, next.stone);
             }
         } else {
             for (usize i = idx; i > to_index; i--) {
-                auto last = moves[i - 1];
+                Move last = moves.at(i - 1);
                 board.unset(last.pos);
             }
         }
@@ -190,11 +193,11 @@ class Board {
 
     /// Infers the next stone to play.
     Stone infer_turn() const {
-        return idx == 0 ? Stone::Black : opposite(moves[idx - 1].stone);
+        return idx == 0 ? Stone::Black : opposite(moves.at(idx - 1).stone);
     }
 
-    /// Checks if there is a win at the point.
-    optional<pair<Axis, Row>> check_win(Point p) const {
+    /// Searches for a win row through the point.
+    optional<Row> find_win_row(Point p) const {
         Stone stone = board.at(p);
         if (stone == Stone::None)
             return nullopt;
@@ -202,7 +205,7 @@ class Board {
         Row row;
         for (Axis axis : AXES) {
             if (scan_row(p, axis, row) >= 5)
-                return pair(axis, row);
+                return row;
         }
         return nullopt;
     }

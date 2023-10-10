@@ -2,7 +2,7 @@
 
 #include "gomoku_core.hpp"
 
-const int BOARD_WIDGET_SIZE = 600;
+const int WINDOW_SIZE = 600;
 const QColor BOARD_BACKGROUND_COLOR(0xffcc66);
 
 const double TENTATIVE_MOVE_OPACITY = 0.5;
@@ -71,6 +71,21 @@ class BoardWidget : public QWidget {
         p.drawEllipse(to_widget_pos(pos), radius, radius);
     }
 
+    void stone_updated() {
+        repaint();
+
+        usize index = board.index(), total = board.total();
+        QString index_str =
+            index == 0 ? QString("开局") : QString("第 %1 手").arg(index);
+        QString title;
+        if (index == total) {
+            title = QString("五子棋 (%1)").arg(index_str);
+        } else {
+            title = QString("五子棋 (%1 / 共 %2 手)").arg(index_str).arg(total);
+        }
+        ((QMainWindow *)parent())->setWindowTitle(title);
+    }
+
     // Event handlers.
   protected:
     void contextMenuEvent(QContextMenuEvent *event) override {
@@ -114,8 +129,8 @@ class BoardWidget : public QWidget {
 
         // Draw the stars.
         double star_radius = grid_size / STAR_RADIUS_RATIO;
-        for (Point star_pos : STAR_POSITIONS) {
-            draw_circle(p, star_pos, star_radius);
+        for (Point pos : STAR_POSITIONS) {
+            draw_circle(p, pos, star_radius);
         }
 
         // Draw the stones.
@@ -177,7 +192,7 @@ class BoardWidget : public QWidget {
 
         stone = opposite(stone);
         tentative_move = nullopt;
-        repaint();
+        stone_updated();
     }
 
     void wheelEvent(QWheelEvent *event) override {
@@ -185,7 +200,7 @@ class BoardWidget : public QWidget {
             return;
         bool forward = event->angleDelta().y() > 0;
         if (forward ? board.reset() : board.unset())
-            repaint();
+            stone_updated();
     }
 
     // Menu slots.
@@ -199,21 +214,21 @@ class BoardWidget : public QWidget {
     void undo() {
         if (board.unset()) {
             stone = board.infer_turn();
-            repaint();
+            stone_updated();
         }
     }
 
     void redo() {
         if (board.reset()) {
             stone = board.infer_turn();
-            repaint();
+            stone_updated();
         }
     }
 
     void clear() {
         if (board.jump(0)) {
             stone = board.infer_turn();
-            repaint();
+            stone_updated();
         }
     }
 
@@ -242,8 +257,8 @@ int main(int argc, char *argv[]) {
 
     QMainWindow window;
     window.setCentralWidget(widget);
-    window.setFixedSize(BOARD_WIDGET_SIZE, BOARD_WIDGET_SIZE);
-    window.setWindowTitle("五子棋");
+    window.setFixedSize(WINDOW_SIZE, WINDOW_SIZE);
+    window.setWindowTitle("五子棋 (开局)");
     window.show();
 
     return app.exec();

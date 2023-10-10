@@ -195,7 +195,7 @@ class Board {
 
     /// Checks if there is a win at the point.
     optional<pair<Axis, Row>> check_win(Point p) const {
-        Stone stone = get(p);
+        Stone stone = board.at(p);
         if (stone == Stone::None)
             return nullopt;
 
@@ -209,7 +209,7 @@ class Board {
 
     /// Scans the row at a point in the direction of the axis.
     u32 scan_row(Point p, Axis axis, Row &row) const {
-        Stone stone = get(p);
+        Stone stone = board.at(p);
         u32 len = 1;
 
         auto scan = [&](Point &cur, bool forward) {

@@ -7,6 +7,8 @@
 #include <utility>
 #include <vector>
 
+#include <QByteArray>
+
 typedef std::uint8_t u8;
 typedef std::int32_t i32;
 typedef std::uint32_t u32;

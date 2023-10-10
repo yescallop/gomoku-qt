@@ -1,5 +1,6 @@
 #pragma once
 
+#include "binary.hpp"
 #include "common.hpp"
 
 /// A stone on the board.
@@ -55,26 +56,23 @@ struct Point {
 
 const usize BOARD_SIZE = 15;
 
+bool in_board(Point p) { return p.x < BOARD_SIZE && p.y < BOARD_SIZE; }
+
 // Inspired by `RawVec` in Rust.
 class RawBoard {
     vector<Stone> mat{BOARD_SIZE * BOARD_SIZE};
 
   public:
-    /// Checks if the board contains a point.
-    bool contains_point(Point p) const {
-        return p.x < BOARD_SIZE && p.y < BOARD_SIZE;
-    }
-
     /// Returns a reference to the stone at the point.
     Stone &at(Point p) {
-        if (!contains_point(p))
+        if (!in_board(p))
             throw std::out_of_range("point out of board");
         return mat.at(p.y * BOARD_SIZE + p.x);
     }
 
     /// Returns a const reference to the stone at the point.
     const Stone &at(Point p) const {
-        if (!contains_point(p))
+        if (!in_board(p))
             throw std::out_of_range("point out of board");
         return mat.at(p.y * BOARD_SIZE + p.x);
     }
@@ -141,8 +139,7 @@ class Board {
         idx += 1;
 
         if (!win || win->index >= idx) {
-            auto win_row = find_win_row(p);
-            if (win_row)
+            if (auto win_row = find_win_row(p))
                 win = {idx, *win_row};
             else
                 win = nullopt;
@@ -217,7 +214,7 @@ class Board {
 
         auto scan = [&](Point &cur, bool forward) {
             Point next;
-            while (board.contains_point(next = cur.adjacent(axis, forward)) &&
+            while (in_board(next = cur.adjacent(axis, forward)) &&
                    board.at(next) == stone) {
                 len += 1;
                 cur = next;
@@ -228,5 +225,39 @@ class Board {
         scan(row.start, false);
         scan(row.end, true);
         return len;
+    }
+
+    /// Serializes the board into a byte array.
+    QByteArray serialize() const {
+        QByteArray buf;
+        for (auto [pos, stone] : past_moves()) {
+            i32 x = i32(pos.x) - BOARD_SIZE / 2;
+            i32 y = i32(pos.y) - BOARD_SIZE / 2;
+            u32 index = interleave(zigzag_encode(x), zigzag_encode(y));
+            write_var_u14(buf, (index << 1) | (u32(stone) - 1));
+        }
+        return buf;
+    }
+
+    /// Deserializes the byte array into a board.
+    static optional<Board> deserialize(const QByteArray &buf) {
+        Board board;
+        usize read = 0;
+
+        while (read < buf.size()) {
+            auto val = read_var_u14(buf, read);
+            if (!val)
+                return nullopt;
+
+            Stone stone = Stone((*val & 1) + 1);
+            auto [ux, uy] = deinterleave(*val >> 1);
+
+            i32 x = zigzag_decode(ux) + BOARD_SIZE / 2;
+            i32 y = zigzag_decode(uy) + BOARD_SIZE / 2;
+            Point pos(x, y);
+            if (!in_board(pos) || !board.set(pos, stone))
+                return nullopt;
+        }
+        return board;
     }
 };

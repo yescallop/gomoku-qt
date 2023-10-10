@@ -1,6 +1,6 @@
 #include <QtWidgets>
 
-#include "gomoku_core.hpp"
+#include "core.hpp"
 
 const int WINDOW_SIZE = 600;
 const QColor BOARD_BACKGROUND_COLOR(0xffcc66);
@@ -15,6 +15,8 @@ const double STONE_RADIUS_RATIO = 2.25;
 
 const Point STAR_POSITIONS[] = {{3, 3}, {3, 11}, {7, 7}, {11, 3}, {11, 11}};
 
+const QByteArray URI_PREFIX("gomoku://");
+
 class BoardWidget : public QWidget {
     Board board;
     Stone stone = Stone::Black;
@@ -28,8 +30,10 @@ class BoardWidget : public QWidget {
     QAction *undo_act;
     QAction *redo_act;
     QAction *clear_act;
-    QAction *review_mode_act;
+    QAction *review_act;
     QAction *win_hint_act;
+    QAction *export_act;
+    QAction *import_act;
 
   public:
     BoardWidget() {
@@ -37,19 +41,28 @@ class BoardWidget : public QWidget {
         undo_act = new QAction("悔棋", this);
         redo_act = new QAction("复位", this);
         clear_act = new QAction("清空", this);
-        review_mode_act = new QAction("复盘模式", this);
-        review_mode_act->setCheckable(true);
+
+        review_act = new QAction("复盘模式", this);
+        review_act->setCheckable(true);
         win_hint_act = new QAction("胜利提示", this);
         win_hint_act->setCheckable(true);
+
+        export_act = new QAction("导出至剪贴板", this);
+        import_act = new QAction("自剪贴板导入", this);
 
         connect(pass_act, &QAction::triggered, this, &BoardWidget::pass);
         connect(undo_act, &QAction::triggered, this, &BoardWidget::undo);
         connect(redo_act, &QAction::triggered, this, &BoardWidget::redo);
         connect(clear_act, &QAction::triggered, this, &BoardWidget::clear);
-        connect(review_mode_act, &QAction::triggered, this,
-                &BoardWidget::review_mode);
+
+        connect(review_act, &QAction::toggled, this, &BoardWidget::review);
         connect(win_hint_act, &QAction::triggered, this,
                 &BoardWidget::win_hint);
+
+        connect(export_act, &QAction::triggered, this,
+                &BoardWidget::export_game);
+        connect(import_act, &QAction::triggered, this,
+                &BoardWidget::import_game);
     }
 
     // Helper methods.
@@ -86,13 +99,25 @@ class BoardWidget : public QWidget {
         ((QMainWindow *)parent())->setWindowTitle(title);
     }
 
+    void import_failed() {
+        QMessageBox box(this);
+        box.setWindowTitle("导入失败");
+        box.setIcon(QMessageBox::Warning);
+        box.setText("自剪贴板导入失败！");
+        box.setInformativeText("请检查剪贴板中文本是否为有效的五子棋 URI。");
+        box.setStandardButtons(QMessageBox::Ok);
+        box.exec();
+    }
+
     // Event handlers.
   protected:
     void contextMenuEvent(QContextMenuEvent *event) override {
         QMenu menu(this);
         menu.addActions({pass_act, undo_act, redo_act, clear_act});
         menu.addSeparator();
-        menu.addActions({review_mode_act, win_hint_act});
+        menu.addActions({review_act, win_hint_act});
+        menu.addSeparator();
+        menu.addActions({export_act, import_act});
         menu.exec(event->globalPos());
     }
 
@@ -232,7 +257,7 @@ class BoardWidget : public QWidget {
         }
     }
 
-    void review_mode(bool enabled) {
+    void review(bool enabled) {
         reviewing = enabled;
         if (!enabled) {
             stone = board.infer_turn();
@@ -246,6 +271,33 @@ class BoardWidget : public QWidget {
         show_win_hint = enabled;
         if (board.first_win())
             repaint();
+    }
+
+    void export_game() {
+        QByteArray text = board.serialize().toBase64().prepend(URI_PREFIX);
+        QClipboard *clipboard = QApplication::clipboard();
+        clipboard->setText(text);
+    }
+
+    void import_game() {
+        QClipboard *clipboard = QApplication::clipboard();
+        QByteArray text = clipboard->text().toUtf8();
+        if (!text.startsWith(URI_PREFIX))
+            return import_failed();
+
+        text.remove(0, URI_PREFIX.size());
+        auto data = QByteArray::fromBase64Encoding(
+            text, QByteArray::AbortOnBase64DecodingErrors);
+        if (!data)
+            return import_failed();
+
+        if (auto res = Board::deserialize(*data)) {
+            board = std::move(*res);
+            review_act->setChecked(true);
+            stone_updated();
+        } else {
+            import_failed();
+        }
     }
 };
 

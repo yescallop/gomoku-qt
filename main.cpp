@@ -19,8 +19,8 @@ class BoardWidget : public QWidget {
     Board board;
     Stone stone = Stone::Black;
     optional<Point> tentative_move;
-    bool view_mode_enabled = false;
-    bool win_hint_enabled = false;
+    bool reviewing = false;
+    bool show_win_hint = false;
 
     double grid_size;
 
@@ -28,7 +28,7 @@ class BoardWidget : public QWidget {
     QAction *undo_act;
     QAction *redo_act;
     QAction *clear_act;
-    QAction *view_mode_act;
+    QAction *review_mode_act;
     QAction *win_hint_act;
 
   public:
@@ -37,8 +37,8 @@ class BoardWidget : public QWidget {
         undo_act = new QAction("悔棋", this);
         redo_act = new QAction("复位", this);
         clear_act = new QAction("清空", this);
-        view_mode_act = new QAction("查看模式", this);
-        view_mode_act->setCheckable(true);
+        review_mode_act = new QAction("复盘模式", this);
+        review_mode_act->setCheckable(true);
         win_hint_act = new QAction("胜利提示", this);
         win_hint_act->setCheckable(true);
 
@@ -46,8 +46,8 @@ class BoardWidget : public QWidget {
         connect(undo_act, &QAction::triggered, this, &BoardWidget::undo);
         connect(redo_act, &QAction::triggered, this, &BoardWidget::redo);
         connect(clear_act, &QAction::triggered, this, &BoardWidget::clear);
-        connect(view_mode_act, &QAction::triggered, this,
-                &BoardWidget::view_mode);
+        connect(review_mode_act, &QAction::triggered, this,
+                &BoardWidget::review_mode);
         connect(win_hint_act, &QAction::triggered, this,
                 &BoardWidget::win_hint);
     }
@@ -92,7 +92,7 @@ class BoardWidget : public QWidget {
         QMenu menu(this);
         menu.addActions({pass_act, undo_act, redo_act, clear_act});
         menu.addSeparator();
-        menu.addActions({view_mode_act, win_hint_act});
+        menu.addActions({review_mode_act, win_hint_act});
         menu.exec(event->globalPos());
     }
 
@@ -143,7 +143,7 @@ class BoardWidget : public QWidget {
 
         // Draw the win hint.
         auto win = board.first_win();
-        if (win_hint_enabled && win) {
+        if (show_win_hint && win) {
             double win_hint_width = grid_size / WIN_HINT_WIDTH_RATIO;
             p.setPen(QPen(Qt::red, win_hint_width, Qt::DotLine));
 
@@ -161,7 +161,7 @@ class BoardWidget : public QWidget {
         }
 
         // Draw the tentative move.
-        if (!view_mode_enabled && tentative_move) {
+        if (!reviewing && tentative_move) {
             p.setBrush(stone == Stone::Black ? Qt::black : Qt::white);
             p.setOpacity(TENTATIVE_MOVE_OPACITY);
             draw_circle(p, *tentative_move, stone_radius);
@@ -169,7 +169,7 @@ class BoardWidget : public QWidget {
     }
 
     void hoverEvent(QSinglePointEvent *event) {
-        if (view_mode_enabled)
+        if (reviewing)
             return;
         optional<Point> p = to_board_pos(event->position());
         if (p && board.get(*p) != Stone::None)
@@ -184,7 +184,7 @@ class BoardWidget : public QWidget {
     void mouseMoveEvent(QMouseEvent *event) override { hoverEvent(event); }
 
     void mousePressEvent(QMouseEvent *event) override {
-        if (event->button() != Qt::LeftButton || view_mode_enabled)
+        if (event->button() != Qt::LeftButton || reviewing)
             return;
         auto p = to_board_pos(event->position());
         if (!p || !board.set(*p, stone))
@@ -196,7 +196,7 @@ class BoardWidget : public QWidget {
     }
 
     void wheelEvent(QWheelEvent *event) override {
-        if (!view_mode_enabled)
+        if (!reviewing)
             return;
         bool forward = event->angleDelta().y() > 0;
         if (forward ? board.reset() : board.unset())
@@ -232,8 +232,8 @@ class BoardWidget : public QWidget {
         }
     }
 
-    void view_mode(bool enabled) {
-        view_mode_enabled = enabled;
+    void review_mode(bool enabled) {
+        reviewing = enabled;
         if (!enabled) {
             stone = board.infer_turn();
         } else if (tentative_move) {
@@ -243,7 +243,7 @@ class BoardWidget : public QWidget {
     }
 
     void win_hint(bool enabled) {
-        win_hint_enabled = enabled;
+        show_win_hint = enabled;
         if (board.first_win())
             repaint();
     }

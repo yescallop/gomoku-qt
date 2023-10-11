@@ -16,6 +16,8 @@
 - 导出至剪贴板：导出对局 URI（以 `gomoku://` 起始）至剪贴板。
 - 自剪贴板导入：解析剪贴板中的对局 URI 并以结果覆盖当前对局。
 
-示例：
+[对局 URI 示例](notable-games.md)
+
+界面示例：
 
 ![示例](assets/demonstration.png)

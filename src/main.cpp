@@ -27,7 +27,7 @@ bool confirm(QWidget *parent, const QString &consequence) {
 }
 
 class BoardWidget : public QWidget {
-    Board board;
+    Game game;
     Stone stone = Stone::Black;
     optional<Point> cursor_pos;
 
@@ -38,10 +38,12 @@ class BoardWidget : public QWidget {
     QAction *redo_act;
     QAction *home_act;
     QAction *end_act;
+
     QAction *review_act;
     QAction *win_hint_act;
     QAction *ordinals_act;
     QAction *lock_stone_act;
+
     QAction *export_act;
     QAction *import_act;
 
@@ -115,11 +117,11 @@ class BoardWidget : public QWidget {
         delete import_act;
     }
 
-    bool can_close_now() { return board.total() == 0; }
+    bool can_close_now() { return game.total() == 0; }
 
     // Helper methods.
   private:
-    optional<Point> to_board_pos(QPointF pos) const {
+    optional<Point> to_game_pos(QPointF pos) const {
         double x = pos.x() / grid_size - 0.5;
         double y = pos.y() / grid_size - 0.5;
 
@@ -137,7 +139,7 @@ class BoardWidget : public QWidget {
     }
 
     void game_updated() {
-        usize index = board.index(), total = board.total();
+        usize index = game.index(), total = game.total();
         QString index_str =
             index == 0 ? QString("开局") : QString("第 %1 手").arg(index);
         QString title;
@@ -163,11 +165,11 @@ class BoardWidget : public QWidget {
 
     void infer_turn() {
         if (!stone_locked())
-            stone = board.infer_turn();
+            stone = game.infer_turn();
     }
 
     optional<Point> filter_unoccupied(optional<Point> p) const {
-        if (p && board.get(*p) != Stone::None)
+        if (p && game.stone_at(*p) != Stone::None)
             p = nullopt;
         return p;
     }
@@ -213,10 +215,9 @@ class BoardWidget : public QWidget {
             p.drawLine(QPointF(pos, grid_size), QPointF(pos, w - grid_size));
         }
 
+        // Draw the stars.
         p.setPen(Qt::NoPen);
         p.setBrush(Qt::black);
-
-        // Draw the stars.
         double star_radius = grid_size / STAR_RADIUS_RATIO;
         for (Point pos : STAR_POSITIONS) {
             draw_circle(p, pos, star_radius);
@@ -224,14 +225,14 @@ class BoardWidget : public QWidget {
 
         // Draw the stones.
         double stone_radius = grid_size / STONE_RADIUS_RATIO;
-        auto moves = board.past_moves();
+        auto moves = game.past_moves();
         for (auto [pos, val] : moves) {
             p.setBrush(val == Stone::Black ? Qt::black : Qt::white);
             draw_circle(p, pos, stone_radius);
         }
 
         // Draw the win hint.
-        auto win = board.first_win();
+        auto win = game.first_win();
         if (shows_win_hint() && win) {
             double win_hint_width = grid_size / WIN_HINT_WIDTH_RATIO;
             p.setPen(QPen(Qt::red, win_hint_width, Qt::DotLine));
@@ -246,6 +247,7 @@ class BoardWidget : public QWidget {
             font.setBold(true);
             QFontMetrics fm(font);
 
+            // Calculate font sizes.
             QRect rects[3] = {fm.tightBoundingRect("0"),
                               fm.tightBoundingRect("00"),
                               fm.tightBoundingRect("000")};
@@ -291,13 +293,11 @@ class BoardWidget : public QWidget {
     }
 
     void hoverEvent(QSinglePointEvent *event) {
-        if (reviewing())
-            return;
-        auto pos = to_board_pos(event->position());
+        auto pos = to_game_pos(event->position());
         bool should_repaint =
             filter_unoccupied(pos) != filter_unoccupied(cursor_pos);
         cursor_pos = pos;
-        if (should_repaint)
+        if (!reviewing() && should_repaint)
             repaint();
     }
 
@@ -307,14 +307,15 @@ class BoardWidget : public QWidget {
     void mousePressEvent(QMouseEvent *event) override {
         if (event->button() != Qt::LeftButton || reviewing())
             return;
-        auto p = to_board_pos(event->position());
+        auto p = to_game_pos(event->position());
         if (!p)
             return;
-        if (board.index() != board.total() &&
-            !confirm(this, QString("覆盖未来的 %1 手棋")
-                               .arg(board.total() - board.index())))
+        if (game.index() != game.total() &&
+            !confirm(
+                this,
+                QString("覆盖未来的 %1 手棋").arg(game.total() - game.index())))
             return;
-        if (!board.set(*p, stone))
+        if (!game.make_move(*p, stone))
             return;
 
         if (!stone_locked())
@@ -326,7 +327,7 @@ class BoardWidget : public QWidget {
         if (!reviewing())
             return;
         bool forward = event->angleDelta().y() > 0;
-        if (forward ? board.reset() : board.unset())
+        if (forward ? game.redo() : game.undo())
             game_updated();
     }
 
@@ -339,34 +340,35 @@ class BoardWidget : public QWidget {
     }
 
     void undo() {
-        if (board.unset()) {
+        if (game.undo()) {
             infer_turn();
             game_updated();
         }
     }
 
     void redo() {
-        if (board.reset()) {
+        if (game.redo()) {
             infer_turn();
             game_updated();
         }
     }
 
     void home() {
-        if (board.jump(0)) {
+        if (game.jump(0)) {
             infer_turn();
             game_updated();
         }
     }
 
     void end() {
-        if (board.jump(board.total())) {
+        if (game.jump(game.total())) {
             infer_turn();
             game_updated();
         }
     }
 
     void toggle_review(bool enabled) {
+        // We may have undone or redone moves in `wheelEvent`.
         if (!enabled)
             infer_turn();
         if (filter_unoccupied(cursor_pos))
@@ -374,17 +376,17 @@ class BoardWidget : public QWidget {
     }
 
     void toggle_win_hint(bool enabled) {
-        if (board.first_win())
+        if (game.first_win())
             repaint();
     }
 
     void toggle_ordinals(bool enabled) {
-        if (board.index() != 0)
+        if (game.index() != 0)
             repaint();
     }
 
     void export_game() {
-        QByteArray text = board.serialize()
+        QByteArray text = game.serialize()
                               .toBase64(QByteArray::Base64UrlEncoding)
                               .prepend(URI_PREFIX);
         QClipboard *clipboard = QApplication::clipboard();
@@ -405,12 +407,13 @@ class BoardWidget : public QWidget {
         if (!data)
             return import_failed("Base64 解码失败。");
 
-        if (auto res = Board::deserialize(*data)) {
-            if (board.total() != 0 &&
-                !confirm(this, QString("导入 %1 手棋并完全覆盖当前棋局")
-                                   .arg(res->total())))
+        if (auto res = Game::deserialize(*data)) {
+            if (game.total() != 0 &&
+                !confirm(this, QString("导入 %1 手棋并完全覆盖当前对局")
+                                   .arg(res->total()))) {
                 return;
-            board = *std::move(res);
+            }
+            game = *std::move(res);
             review_act->setChecked(true);
             game_updated();
         } else {
@@ -423,7 +426,7 @@ class MainWindow : public QMainWindow {
   protected:
     void closeEvent(QCloseEvent *event) override {
         BoardWidget *widget = (BoardWidget *)centralWidget();
-        if (widget->can_close_now() || confirm(this, "使您丢失未保存的棋局"))
+        if (widget->can_close_now() || confirm(this, "使您丢失未保存的对局"))
             event->accept();
         else
             event->ignore();

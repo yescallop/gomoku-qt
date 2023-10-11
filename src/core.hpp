@@ -1,6 +1,25 @@
 #pragma once
 
-#include "common.hpp"
+#include <algorithm>
+#include <cstdint>
+#include <optional>
+#include <span>
+#include <stdexcept>
+#include <utility>
+#include <vector>
+
+#include <QByteArray>
+
+typedef std::uint8_t u8;
+typedef std::int32_t i32;
+typedef std::uint32_t u32;
+typedef std::size_t usize;
+
+using std::nullopt;
+using std::optional;
+using std::pair;
+using std::span;
+using std::vector;
 
 /// A stone on the board.
 enum struct Stone : u8 { None = 0, Black = 1, White = 2 };
@@ -60,8 +79,7 @@ static_assert(BOARD_SIZE * BOARD_SIZE < 0xfe);
 /// Checks if a point is in the board.
 bool in_board(Point p) { return p.x < BOARD_SIZE && p.y < BOARD_SIZE; }
 
-// Inspired by `RawVec` in Rust.
-class RawBoard {
+class Board {
     vector<Stone> mat{BOARD_SIZE * BOARD_SIZE};
 
   public:
@@ -101,8 +119,8 @@ struct Win {
     Row row;
 };
 
-class Board {
-    RawBoard board;
+class Game {
+    Board board;
     vector<Move> moves;
     usize idx = 0;
     optional<Win> win;
@@ -129,10 +147,10 @@ class Board {
     }
 
     /// Gets the stone at a point.
-    Stone get(Point p) const { return board.at(p); }
+    Stone stone_at(Point p) const { return board.at(p); }
 
-    /// Sets the stone at a point, clearing moves in the future.
-    bool set(Point p, Stone stone) {
+    /// Makes a move at a point, clearing moves in the future.
+    bool make_move(Point p, Stone stone) {
         Stone &val = board.at(p);
         if (val != Stone::None)
             return false;
@@ -151,8 +169,8 @@ class Board {
         return true;
     }
 
-    /// Unsets the last move (if any).
-    bool unset() {
+    /// Undoes the last move (if any).
+    bool undo() {
         if (idx == 0)
             return false;
         idx -= 1;
@@ -161,8 +179,8 @@ class Board {
         return true;
     }
 
-    /// Resets the next move (if any).
-    bool reset() {
+    /// Redoes the next move (if any).
+    bool redo() {
         if (idx >= total())
             return false;
         Move next = moves.at(idx);
@@ -231,7 +249,7 @@ class Board {
         return len;
     }
 
-    /// Serializes the board into a byte array.
+    /// Serializes the game into a byte array.
     QByteArray serialize() const {
         QByteArray buf;
 
@@ -262,9 +280,9 @@ class Board {
         return buf;
     }
 
-    /// Deserializes the byte array into a board.
-    static optional<Board> deserialize(const QByteArray &buf) {
-        Board board;
+    /// Deserializes the byte array into a game.
+    static optional<Game> deserialize(const QByteArray &buf) {
+        Game game;
         Stone stone = Stone::Black;
         bool in_sequence = false;
 
@@ -284,7 +302,7 @@ class Board {
             }
 
             Point pos(byte % BOARD_SIZE, byte / BOARD_SIZE);
-            if (!in_board(pos) || !board.set(pos, stone))
+            if (!in_board(pos) || !game.make_move(pos, stone))
                 return nullopt;
             if (!in_sequence)
                 stone = opposite(stone);
@@ -292,6 +310,6 @@ class Board {
 
         if (in_sequence)
             return nullopt;
-        return board;
+        return game;
     }
 };

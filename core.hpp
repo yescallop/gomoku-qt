@@ -1,6 +1,5 @@
 #pragma once
 
-#include "binary.hpp"
 #include "common.hpp"
 
 /// A stone on the board.
@@ -56,6 +55,9 @@ struct Point {
 
 const usize BOARD_SIZE = 15;
 
+static_assert(BOARD_SIZE * BOARD_SIZE < 0xfe);
+
+/// Checks if a point is in the board.
 bool in_board(Point p) { return p.x < BOARD_SIZE && p.y < BOARD_SIZE; }
 
 // Inspired by `RawVec` in Rust.
@@ -104,6 +106,8 @@ class Board {
     vector<Move> moves;
     usize idx = 0;
     optional<Win> win;
+
+    enum CtrlByte : u8 { BEGIN_SEQUENCE = 0xff, END_SEQUENCE = 0xfe };
 
   public:
     /// Returns the total number of moves, on or off the board,
@@ -230,34 +234,64 @@ class Board {
     /// Serializes the board into a byte array.
     QByteArray serialize() const {
         QByteArray buf;
-        for (auto [pos, stone] : past_moves()) {
-            i32 x = i32(pos.x) - BOARD_SIZE / 2;
-            i32 y = i32(pos.y) - BOARD_SIZE / 2;
-            u32 index = interleave(zigzag_encode(x), zigzag_encode(y));
-            write_var_u14(buf, (index << 1) | (u32(stone) - 1));
+
+        auto moves = past_moves();
+        if (!moves.empty() && moves[0].stone == Stone::White) {
+            buf.append(CtrlByte::BEGIN_SEQUENCE);
+            buf.append(CtrlByte::END_SEQUENCE);
         }
+
+        Stone last_stone = Stone::None;
+        bool in_sequence = false;
+        for (auto [pos, stone] : moves) {
+            if (last_stone == stone) {
+                if (!in_sequence) {
+                    buf.insert(buf.size() - 1, CtrlByte::BEGIN_SEQUENCE);
+                    in_sequence = true;
+                }
+            } else if (in_sequence) {
+                buf.append(CtrlByte::END_SEQUENCE);
+                in_sequence = false;
+            }
+            buf.append(pos.y * BOARD_SIZE + pos.x);
+            last_stone = stone;
+        }
+
+        if (in_sequence)
+            buf.append(CtrlByte::END_SEQUENCE);
         return buf;
     }
 
     /// Deserializes the byte array into a board.
     static optional<Board> deserialize(const QByteArray &buf) {
         Board board;
-        usize read = 0;
+        Stone stone = Stone::Black;
+        bool in_sequence = false;
 
-        while (read < buf.size()) {
-            auto val = read_var_u14(buf, read);
-            if (!val)
-                return nullopt;
+        for (u8 byte : buf) {
+            if (byte == CtrlByte::BEGIN_SEQUENCE) {
+                if (in_sequence)
+                    return nullopt;
+                in_sequence = true;
+                continue;
+            }
+            if (byte == CtrlByte::END_SEQUENCE) {
+                if (!in_sequence)
+                    return nullopt;
+                in_sequence = false;
+                stone = opposite(stone);
+                continue;
+            }
 
-            Stone stone = Stone((*val & 1) + 1);
-            auto [ux, uy] = deinterleave(*val >> 1);
-
-            i32 x = zigzag_decode(ux) + BOARD_SIZE / 2;
-            i32 y = zigzag_decode(uy) + BOARD_SIZE / 2;
-            Point pos(x, y);
+            Point pos(byte % BOARD_SIZE, byte / BOARD_SIZE);
             if (!in_board(pos) || !board.set(pos, stone))
                 return nullopt;
+            if (!in_sequence)
+                stone = opposite(stone);
         }
+
+        if (in_sequence)
+            return nullopt;
         return board;
     }
 };

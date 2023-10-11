@@ -17,53 +17,93 @@ const Point STAR_POSITIONS[] = {{3, 3}, {3, 11}, {7, 7}, {11, 3}, {11, 11}};
 
 const QByteArray URI_PREFIX("gomoku://");
 
+bool confirm(QWidget *parent, const QString &consequence) {
+    return QMessageBox::question(
+               parent, "确认操作",
+               QString("这将%1，是否继续操作？").arg(consequence),
+               QMessageBox::Yes | QMessageBox::No,
+               QMessageBox::No) == QMessageBox::Yes;
+}
+
 class BoardWidget : public QWidget {
     Board board;
     Stone stone = Stone::Black;
     optional<Point> tentative_move;
-    bool reviewing = false;
-    bool show_win_hint = false;
 
     double grid_size;
 
     QAction *pass_act;
     QAction *undo_act;
     QAction *redo_act;
-    QAction *clear_act;
+    QAction *home_act;
+    QAction *end_act;
     QAction *review_act;
     QAction *win_hint_act;
+    QAction *lock_stone_act;
     QAction *export_act;
     QAction *import_act;
+
+    bool reviewing() const { return review_act->isChecked(); }
+    bool show_win_hint() const { return win_hint_act->isChecked(); }
+    bool stone_locked() const { return lock_stone_act->isChecked(); }
 
   public:
     BoardWidget() {
         pass_act = new QAction("让子", this);
+        pass_act->setShortcut(Qt::CTRL | Qt::Key_P);
         undo_act = new QAction("悔棋", this);
+        undo_act->setShortcut(Qt::CTRL | Qt::Key_Z);
         redo_act = new QAction("复位", this);
-        clear_act = new QAction("清空", this);
+        redo_act->setShortcut(Qt::CTRL | Qt::Key_Y);
+        home_act = new QAction("跳转至开局", this);
+        home_act->setShortcut(Qt::Key_Home);
+        end_act = new QAction("跳转至局末", this);
+        end_act->setShortcut(Qt::Key_End);
 
         review_act = new QAction("复盘模式", this);
         review_act->setCheckable(true);
         win_hint_act = new QAction("胜利提示", this);
         win_hint_act->setCheckable(true);
+        lock_stone_act = new QAction("锁定棋子", this);
+        lock_stone_act->setCheckable(true);
 
         export_act = new QAction("导出至剪贴板", this);
+        export_act->setShortcut(Qt::CTRL | Qt::Key_C);
         import_act = new QAction("自剪贴板导入", this);
+        import_act->setShortcut(Qt::CTRL | Qt::Key_V);
 
         connect(pass_act, &QAction::triggered, this, &BoardWidget::pass);
         connect(undo_act, &QAction::triggered, this, &BoardWidget::undo);
         connect(redo_act, &QAction::triggered, this, &BoardWidget::redo);
-        connect(clear_act, &QAction::triggered, this, &BoardWidget::clear);
+        connect(home_act, &QAction::triggered, this, &BoardWidget::home);
+        connect(end_act, &QAction::triggered, this, &BoardWidget::end);
 
         connect(review_act, &QAction::toggled, this, &BoardWidget::review);
-        connect(win_hint_act, &QAction::triggered, this,
-                &BoardWidget::win_hint);
+        connect(win_hint_act, &QAction::toggled, this, &BoardWidget::win_hint);
 
         connect(export_act, &QAction::triggered, this,
                 &BoardWidget::export_game);
         connect(import_act, &QAction::triggered, this,
                 &BoardWidget::import_game);
+
+        addActions({pass_act, undo_act, redo_act, home_act, end_act, export_act,
+                    import_act});
     }
+
+    ~BoardWidget() {
+        delete pass_act;
+        delete undo_act;
+        delete redo_act;
+        delete home_act;
+        delete end_act;
+        delete review_act;
+        delete win_hint_act;
+        delete lock_stone_act;
+        delete export_act;
+        delete import_act;
+    }
+
+    bool can_close_now() { return board.total() == 0; }
 
     // Helper methods.
   private:
@@ -84,9 +124,7 @@ class BoardWidget : public QWidget {
         p.drawEllipse(to_widget_pos(pos), radius, radius);
     }
 
-    void stone_updated() {
-        repaint();
-
+    void game_updated() {
         usize index = board.index(), total = board.total();
         QString index_str =
             index == 0 ? QString("开局") : QString("第 %1 手").arg(index);
@@ -97,14 +135,16 @@ class BoardWidget : public QWidget {
             title = QString("五子棋 (%1 / 共 %2 手)").arg(index_str).arg(total);
         }
         ((QMainWindow *)parent())->setWindowTitle(title);
+
+        repaint();
     }
 
-    void import_failed() {
+    void import_failed(const QString &text) {
         QMessageBox box(this);
-        box.setWindowTitle("导入失败");
+        box.setWindowTitle("自剪贴板导入失败");
         box.setIcon(QMessageBox::Warning);
-        box.setText("自剪贴板导入失败！");
-        box.setInformativeText("请检查剪贴板中文本是否为有效的五子棋 URI。");
+        box.setText(text);
+        box.setInformativeText("请检查剪贴板中的文本是否有误。");
         box.setStandardButtons(QMessageBox::Ok);
         box.exec();
     }
@@ -113,9 +153,9 @@ class BoardWidget : public QWidget {
   protected:
     void contextMenuEvent(QContextMenuEvent *event) override {
         QMenu menu(this);
-        menu.addActions({pass_act, undo_act, redo_act, clear_act});
+        menu.addActions({pass_act, undo_act, redo_act, home_act, end_act});
         menu.addSeparator();
-        menu.addActions({review_act, win_hint_act});
+        menu.addActions({review_act, win_hint_act, lock_stone_act});
         menu.addSeparator();
         menu.addActions({export_act, import_act});
         menu.exec(event->globalPos());
@@ -168,7 +208,7 @@ class BoardWidget : public QWidget {
 
         // Draw the win hint.
         auto win = board.first_win();
-        if (show_win_hint && win) {
+        if (show_win_hint() && win) {
             double win_hint_width = grid_size / WIN_HINT_WIDTH_RATIO;
             p.setPen(QPen(Qt::red, win_hint_width, Qt::DotLine));
 
@@ -186,7 +226,7 @@ class BoardWidget : public QWidget {
         }
 
         // Draw the tentative move.
-        if (!reviewing && tentative_move) {
+        if (!reviewing() && tentative_move) {
             p.setBrush(stone == Stone::Black ? Qt::black : Qt::white);
             p.setOpacity(TENTATIVE_MOVE_OPACITY);
             draw_circle(p, *tentative_move, stone_radius);
@@ -194,7 +234,7 @@ class BoardWidget : public QWidget {
     }
 
     void hoverEvent(QSinglePointEvent *event) {
-        if (reviewing)
+        if (reviewing())
             return;
         optional<Point> p = to_board_pos(event->position());
         if (p && board.get(*p) != Stone::None)
@@ -209,23 +249,30 @@ class BoardWidget : public QWidget {
     void mouseMoveEvent(QMouseEvent *event) override { hoverEvent(event); }
 
     void mousePressEvent(QMouseEvent *event) override {
-        if (event->button() != Qt::LeftButton || reviewing)
+        if (event->button() != Qt::LeftButton || reviewing())
             return;
         auto p = to_board_pos(event->position());
-        if (!p || !board.set(*p, stone))
+        if (!p)
+            return;
+        if (board.index() != board.total() &&
+            !confirm(this, QString("覆盖未来的 %1 手棋")
+                               .arg(board.total() - board.index())))
+            return;
+        if (!board.set(*p, stone))
             return;
 
-        stone = opposite(stone);
+        if (!stone_locked())
+            stone = opposite(stone);
         tentative_move = nullopt;
-        stone_updated();
+        game_updated();
     }
 
     void wheelEvent(QWheelEvent *event) override {
-        if (!reviewing)
+        if (!reviewing())
             return;
         bool forward = event->angleDelta().y() > 0;
         if (forward ? board.reset() : board.unset())
-            stone_updated();
+            game_updated();
     }
 
     // Menu slots.
@@ -239,26 +286,32 @@ class BoardWidget : public QWidget {
     void undo() {
         if (board.unset()) {
             stone = board.infer_turn();
-            stone_updated();
+            game_updated();
         }
     }
 
     void redo() {
         if (board.reset()) {
             stone = board.infer_turn();
-            stone_updated();
+            game_updated();
         }
     }
 
-    void clear() {
+    void home() {
         if (board.jump(0)) {
             stone = board.infer_turn();
-            stone_updated();
+            game_updated();
+        }
+    }
+
+    void end() {
+        if (board.jump(board.total())) {
+            stone = board.infer_turn();
+            game_updated();
         }
     }
 
     void review(bool enabled) {
-        reviewing = enabled;
         if (!enabled) {
             stone = board.infer_turn();
         } else if (tentative_move) {
@@ -268,36 +321,54 @@ class BoardWidget : public QWidget {
     }
 
     void win_hint(bool enabled) {
-        show_win_hint = enabled;
         if (board.first_win())
             repaint();
     }
 
     void export_game() {
-        QByteArray text = board.serialize().toBase64().prepend(URI_PREFIX);
+        QByteArray text = board.serialize()
+                              .toBase64(QByteArray::Base64UrlEncoding)
+                              .prepend(URI_PREFIX);
         QClipboard *clipboard = QApplication::clipboard();
         clipboard->setText(text);
     }
 
     void import_game() {
         QClipboard *clipboard = QApplication::clipboard();
-        QByteArray text = clipboard->text().toUtf8();
+        QByteArray text = clipboard->text().toUtf8().trimmed();
         if (!text.startsWith(URI_PREFIX))
-            return import_failed();
+            return import_failed(
+                "合法的五子棋对局 URI 应以 \"gomoku://\" 起始。");
 
         text.remove(0, URI_PREFIX.size());
         auto data = QByteArray::fromBase64Encoding(
-            text, QByteArray::AbortOnBase64DecodingErrors);
+            text, QByteArray::Base64UrlEncoding |
+                      QByteArray::AbortOnBase64DecodingErrors);
         if (!data)
-            return import_failed();
+            return import_failed("Base64 解码失败。");
 
         if (auto res = Board::deserialize(*data)) {
+            if (board.total() != 0 &&
+                !confirm(this, QString("导入 %1 手棋并完全覆盖当前棋局")
+                                   .arg(res->total())))
+                return;
             board = std::move(*res);
             review_act->setChecked(true);
-            stone_updated();
+            game_updated();
         } else {
-            import_failed();
+            import_failed("反序列化失败。");
         }
+    }
+};
+
+class MainWindow : public QMainWindow {
+  protected:
+    void closeEvent(QCloseEvent *event) override {
+        BoardWidget *widget = (BoardWidget *)centralWidget();
+        if (widget->can_close_now() || confirm(this, "使您丢失未保存的棋局"))
+            event->accept();
+        else
+            event->ignore();
     }
 };
 
@@ -307,7 +378,7 @@ int main(int argc, char *argv[]) {
     BoardWidget *widget = new BoardWidget();
     widget->setMouseTracking(true);
 
-    QMainWindow window;
+    MainWindow window;
     window.setCentralWidget(widget);
     window.setFixedSize(WINDOW_SIZE, WINDOW_SIZE);
     window.setWindowTitle("五子棋 (开局)");

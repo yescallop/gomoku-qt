@@ -12,6 +12,7 @@ const double LINE_WIDTH_RATIO = 24.0;
 const double WIN_HINT_WIDTH_RATIO = 12.0;
 const double STAR_RADIUS_RATIO = 10.0;
 const double STONE_RADIUS_RATIO = 2.25;
+const double ORDINAL_SIZE_RATIOS[] = {0.65, 0.75, 0.85};
 
 const Point STAR_POSITIONS[] = {{3, 3}, {3, 11}, {7, 7}, {11, 3}, {11, 11}};
 
@@ -28,7 +29,7 @@ bool confirm(QWidget *parent, const QString &consequence) {
 class BoardWidget : public QWidget {
     Board board;
     Stone stone = Stone::Black;
-    optional<Point> tentative_move;
+    optional<Point> cursor_pos;
 
     double grid_size;
 
@@ -39,12 +40,14 @@ class BoardWidget : public QWidget {
     QAction *end_act;
     QAction *review_act;
     QAction *win_hint_act;
+    QAction *ordinals_act;
     QAction *lock_stone_act;
     QAction *export_act;
     QAction *import_act;
 
     bool reviewing() const { return review_act->isChecked(); }
-    bool show_win_hint() const { return win_hint_act->isChecked(); }
+    bool shows_win_hint() const { return win_hint_act->isChecked(); }
+    bool shows_ordinals() const { return ordinals_act->isChecked(); }
     bool stone_locked() const { return lock_stone_act->isChecked(); }
 
   public:
@@ -64,6 +67,8 @@ class BoardWidget : public QWidget {
         review_act->setCheckable(true);
         win_hint_act = new QAction("胜利提示", this);
         win_hint_act->setCheckable(true);
+        ordinals_act = new QAction("序号显示", this);
+        ordinals_act->setCheckable(true);
         lock_stone_act = new QAction("锁定棋子", this);
         lock_stone_act->setCheckable(true);
 
@@ -78,8 +83,12 @@ class BoardWidget : public QWidget {
         connect(home_act, &QAction::triggered, this, &BoardWidget::home);
         connect(end_act, &QAction::triggered, this, &BoardWidget::end);
 
-        connect(review_act, &QAction::toggled, this, &BoardWidget::review);
-        connect(win_hint_act, &QAction::toggled, this, &BoardWidget::win_hint);
+        connect(review_act, &QAction::toggled, this,
+                &BoardWidget::toggle_review);
+        connect(win_hint_act, &QAction::toggled, this,
+                &BoardWidget::toggle_win_hint);
+        connect(ordinals_act, &QAction::toggled, this,
+                &BoardWidget::toggle_ordinals);
 
         connect(export_act, &QAction::triggered, this,
                 &BoardWidget::export_game);
@@ -96,9 +105,12 @@ class BoardWidget : public QWidget {
         delete redo_act;
         delete home_act;
         delete end_act;
+
         delete review_act;
         delete win_hint_act;
+        delete ordinals_act;
         delete lock_stone_act;
+
         delete export_act;
         delete import_act;
     }
@@ -149,13 +161,25 @@ class BoardWidget : public QWidget {
         box.exec();
     }
 
+    void infer_turn() {
+        if (!stone_locked())
+            stone = board.infer_turn();
+    }
+
+    optional<Point> filter_unoccupied(optional<Point> p) const {
+        if (p && board.get(*p) != Stone::None)
+            p = nullopt;
+        return p;
+    }
+
     // Event handlers.
   protected:
     void contextMenuEvent(QContextMenuEvent *event) override {
         QMenu menu(this);
         menu.addActions({pass_act, undo_act, redo_act, home_act, end_act});
         menu.addSeparator();
-        menu.addActions({review_act, win_hint_act, lock_stone_act});
+        menu.addActions(
+            {review_act, win_hint_act, ordinals_act, lock_stone_act});
         menu.addSeparator();
         menu.addActions({export_act, import_act});
         menu.exec(event->globalPos());
@@ -208,7 +232,7 @@ class BoardWidget : public QWidget {
 
         // Draw the win hint.
         auto win = board.first_win();
-        if (show_win_hint() && win) {
+        if (shows_win_hint() && win) {
             double win_hint_width = grid_size / WIN_HINT_WIDTH_RATIO;
             p.setPen(QPen(Qt::red, win_hint_width, Qt::DotLine));
 
@@ -216,33 +240,65 @@ class BoardWidget : public QWidget {
             p.drawLine(to_widget_pos(start), to_widget_pos(end));
         }
 
-        p.setPen(Qt::NoPen);
+        if (shows_ordinals()) {
+            // Draw the ordinals.
+            QFont font("Arial", 64);
+            font.setBold(true);
+            QFontMetrics fm(font);
 
-        // Draw a star on the last stone placed.
-        if (!moves.empty()) {
+            QRect rects[3] = {fm.tightBoundingRect("0"),
+                              fm.tightBoundingRect("00"),
+                              fm.tightBoundingRect("000")};
+            double font_sizes[3];
+            double stone_diameter = stone_radius * 2.0;
+            for (int i = 0; i < 3; i++) {
+                int text_diameter =
+                    std::max(rects[i].width(), rects[i].height());
+                double ratio =
+                    stone_diameter / text_diameter * ORDINAL_SIZE_RATIOS[i];
+                font_sizes[i] = 64.0 * ratio;
+            }
+
+            for (usize i = 0; i < moves.size(); i++) {
+                auto [pos, val] = moves[i];
+                QPointF wpos = to_widget_pos(pos);
+                QRectF stone_rect(wpos.x() - stone_radius,
+                                  wpos.y() - stone_radius, stone_diameter,
+                                  stone_diameter);
+
+                QString ordinal = QString::number(i + 1);
+                font.setPointSizeF(font_sizes[ordinal.size() - 1]);
+
+                p.setPen(val == Stone::Black ? Qt::white : Qt::black);
+                p.setFont(font);
+                p.drawText(stone_rect, Qt::AlignCenter, ordinal);
+            }
+        } else if (!moves.empty()) {
+            // Draw a star on the last stone placed.
             auto [pos, val] = moves.back();
+            p.setPen(Qt::NoPen);
             p.setBrush(val == Stone::Black ? Qt::white : Qt::black);
             draw_circle(p, pos, star_radius);
         }
 
         // Draw the tentative move.
-        if (!reviewing() && tentative_move) {
+        p.setPen(Qt::NoPen);
+        if (!reviewing() && filter_unoccupied(cursor_pos)) {
             p.setBrush(stone == Stone::Black ? Qt::black : Qt::white);
             p.setOpacity(TENTATIVE_MOVE_OPACITY);
-            draw_circle(p, *tentative_move, stone_radius);
+            draw_circle(p, *cursor_pos, stone_radius);
         }
     }
 
     void hoverEvent(QSinglePointEvent *event) {
         if (reviewing())
             return;
-        optional<Point> p = to_board_pos(event->position());
-        if (p && board.get(*p) != Stone::None)
-            p = nullopt;
-        if (tentative_move != p) {
-            tentative_move = p;
+        auto pos = to_board_pos(event->position());
+        bool should_repaint =
+            filter_unoccupied(pos) != filter_unoccupied(cursor_pos);
+        cursor_pos = pos;
+        if (should_repaint)
             repaint();
-        }
     }
 
     void enterEvent(QEnterEvent *event) override { hoverEvent(event); }
@@ -263,7 +319,6 @@ class BoardWidget : public QWidget {
 
         if (!stone_locked())
             stone = opposite(stone);
-        tentative_move = nullopt;
         game_updated();
     }
 
@@ -279,49 +334,52 @@ class BoardWidget : public QWidget {
   private:
     void pass() {
         stone = opposite(stone);
-        if (tentative_move)
+        if (filter_unoccupied(cursor_pos))
             repaint();
     }
 
     void undo() {
         if (board.unset()) {
-            stone = board.infer_turn();
+            infer_turn();
             game_updated();
         }
     }
 
     void redo() {
         if (board.reset()) {
-            stone = board.infer_turn();
+            infer_turn();
             game_updated();
         }
     }
 
     void home() {
         if (board.jump(0)) {
-            stone = board.infer_turn();
+            infer_turn();
             game_updated();
         }
     }
 
     void end() {
         if (board.jump(board.total())) {
-            stone = board.infer_turn();
+            infer_turn();
             game_updated();
         }
     }
 
-    void review(bool enabled) {
-        if (!enabled) {
-            stone = board.infer_turn();
-        } else if (tentative_move) {
-            tentative_move = nullopt;
+    void toggle_review(bool enabled) {
+        if (!enabled)
+            infer_turn();
+        if (filter_unoccupied(cursor_pos))
             repaint();
-        }
     }
 
-    void win_hint(bool enabled) {
+    void toggle_win_hint(bool enabled) {
         if (board.first_win())
+            repaint();
+    }
+
+    void toggle_ordinals(bool enabled) {
+        if (board.index() != 0)
             repaint();
     }
 
@@ -352,7 +410,7 @@ class BoardWidget : public QWidget {
                 !confirm(this, QString("导入 %1 手棋并完全覆盖当前棋局")
                                    .arg(res->total())))
                 return;
-            board = std::move(*res);
+            board = *std::move(res);
             review_act->setChecked(true);
             game_updated();
         } else {

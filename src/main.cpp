@@ -399,7 +399,8 @@ class BoardWidget : public QWidget {
     void export_game() {
         QByteArray text = game.serialize()
                               .toBase64(QByteArray::Base64UrlEncoding)
-                              .prepend(URI_PREFIX);
+                              .prepend(URI_PREFIX)
+                              .append('/');
         QClipboard *clipboard = QApplication::clipboard();
         clipboard->setText(text);
     }

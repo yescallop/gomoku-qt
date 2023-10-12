@@ -410,11 +410,15 @@ class BoardWidget : public QWidget {
         if (!text.startsWith(URI_PREFIX))
             return import_failed(
                 "合法的五子棋对局 URI 应以 \"gomoku://\" 起始。");
+        text.remove(0, URI_PREFIX.size());
+        // Avoid partial copies.
+        if (!text.endsWith('/'))
+            return import_failed("合法的五子棋对局 URI 应以 \"/\" 结束。");
+        text.chop(1);
 
         auto data = QByteArray::fromBase64Encoding(
-            text.sliced(URI_PREFIX.size()),
-            QByteArray::Base64UrlEncoding |
-                QByteArray::AbortOnBase64DecodingErrors);
+            text, QByteArray::Base64UrlEncoding |
+                      QByteArray::AbortOnBase64DecodingErrors);
         if (!data)
             return import_failed("Base64 解码失败。");
 

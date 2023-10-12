@@ -72,13 +72,18 @@ struct Point {
     }
 };
 
+/// A contiguous row of stones on the board.
+struct Row {
+    Point start;
+    Point end;
+};
+
 const usize BOARD_SIZE = 15;
 
-static_assert(BOARD_SIZE * BOARD_SIZE < 0xfe);
-
-/// Checks if a point is in the board.
+/// Checks if a point is within the board boundary.
 bool in_board(Point p) { return p.x < BOARD_SIZE && p.y < BOARD_SIZE; }
 
+/// A 15x15 gomoku board.
 class Board {
     vector<Stone> mat{BOARD_SIZE * BOARD_SIZE};
 
@@ -102,32 +107,77 @@ class Board {
 
     /// Unsets the stone at a point.
     void unset(Point p) { at(p) = Stone::None; }
+
+    /// Scans the row through a point in the direction of the axis.
+    u32 scan_row(Point p, Axis axis, Row &row) const {
+        Stone stone = at(p);
+        u32 len = 1;
+
+        auto scan = [&](Point &cur, bool forward) {
+            Point next;
+            while (in_board(next = cur.adjacent(axis, forward)) &&
+                   at(next) == stone) {
+                len += 1;
+                cur = next;
+            }
+        };
+
+        row = {p, p};
+        scan(row.start, false);
+        scan(row.end, true);
+        return len;
+    }
+
+    /// Searches for a win row through the point.
+    optional<Row> find_win_row(Point p) const {
+        Stone stone = at(p);
+        if (stone == Stone::None)
+            return nullopt;
+
+        Row row;
+        for (Axis axis : AXES) {
+            if (scan_row(p, axis, row) >= 5)
+                return row;
+        }
+        return nullopt;
+    }
 };
 
+/// A move on the board, namely a (position, stone) pair.
 struct Move {
     Point pos;
     Stone stone;
+
+    bool operator==(Move other) const {
+        return pos == other.pos && stone == other.stone;
+    }
 };
 
-struct Row {
-    Point start;
-    Point end;
-};
-
+/// A win witnessed on the board, namely a (move index, row) pair.
 struct Win {
     usize index;
     Row row;
 };
 
+/// A gomoku game, namely a record of moves.
 class Game {
     Board board;
     vector<Move> moves;
     usize index = 0;
     optional<Win> win;
 
+    /// Control bytes used in serialization.
     enum CtrlByte : u8 { BEGIN_SEQUENCE = 0xff, END_SEQUENCE = 0xfe };
 
+    // Ensure that position bytes cannot collide with control bytes
+    // in serialization.
+    static_assert(BOARD_SIZE * BOARD_SIZE < 0xfe);
+
   public:
+    bool operator==(const Game &other) const {
+        return moves == other.moves && index == other.index;
+    }
+
     /// Returns the total number of moves, on or off the board,
     /// in the past or in the future.
     usize total_moves() const { return moves.size(); }
@@ -166,7 +216,7 @@ class Game {
         index += 1;
 
         if (!win || win->index >= index) {
-            if (auto win_row = find_win_row(p))
+            if (auto win_row = board.find_win_row(p))
                 win = {index, *win_row};
             else
                 win = nullopt;
@@ -197,7 +247,7 @@ class Game {
     /// Jumps to the given move index by undoing or redoing moves.
     bool jump(usize to_index) {
         if (to_index > moves.size())
-            throw std::out_of_range("index out of range");
+            throw std::out_of_range("move index out of range");
         if (index == to_index)
             return false;
         if (index < to_index) {
@@ -215,43 +265,9 @@ class Game {
         return true;
     }
 
-    /// Infers the next stone to play.
+    /// Infers the next stone to play, based on past moves.
     Stone infer_turn() const {
         return index == 0 ? Stone::Black : opposite(moves.at(index - 1).stone);
-    }
-
-    /// Searches for a win row through the point.
-    optional<Row> find_win_row(Point p) const {
-        Stone stone = board.at(p);
-        if (stone == Stone::None)
-            return nullopt;
-
-        Row row;
-        for (Axis axis : AXES) {
-            if (scan_row(p, axis, row) >= 5)
-                return row;
-        }
-        return nullopt;
-    }
-
-    /// Scans the row at a point in the direction of the axis.
-    u32 scan_row(Point p, Axis axis, Row &row) const {
-        Stone stone = board.at(p);
-        u32 len = 1;
-
-        auto scan = [&](Point &cur, bool forward) {
-            Point next;
-            while (in_board(next = cur.adjacent(axis, forward)) &&
-                   board.at(next) == stone) {
-                len += 1;
-                cur = next;
-            }
-        };
-
-        row = {p, p};
-        scan(row.start, false);
-        scan(row.end, true);
-        return len;
     }
 
     /// Serializes the game into a byte array.

@@ -3,6 +3,7 @@
 #include "core.hpp"
 
 const int WINDOW_SIZE = 600;
+
 const QColor BOARD_BACKGROUND_COLOR(0xffcc66);
 
 const double TENTATIVE_MOVE_OPACITY = 0.5;
@@ -12,12 +13,13 @@ const double LINE_WIDTH_RATIO = 24.0;
 const double WIN_HINT_WIDTH_RATIO = 12.0;
 const double STAR_RADIUS_RATIO = 10.0;
 const double STONE_RADIUS_RATIO = 2.25;
-const double ORDINAL_SIZE_RATIOS[] = {0.65, 0.75, 0.85};
+const double ORDINAL_FONT_SIZE_RATIOS[] = {0.65, 0.75, 0.85};
 
 const Point STAR_POSITIONS[] = {{3, 3}, {3, 11}, {7, 7}, {11, 3}, {11, 11}};
 
 const QByteArray URI_PREFIX("gomoku://");
 
+/// Asks the user for confirmation that the consequence is understood.
 bool confirm(QWidget *parent, const QString &consequence) {
     QMessageBox box(parent);
     box.setWindowTitle("确认操作");
@@ -40,7 +42,12 @@ class BoardWidget : public QWidget {
     Stone stone = Stone::Black;
     optional<Point> cursor_pos;
 
+    // This is set at the very beginning of `paintEvent`, so that
+    // other event handlers may use it to convert screen position
+    // back to game position, as implemented in `to_game_pos`.
     double grid_size;
+
+    /* Menu actions */
 
     QAction *pass_act;
     QAction *undo_act;
@@ -71,8 +78,10 @@ class BoardWidget : public QWidget {
         redo_act->setShortcut(Qt::CTRL | Qt::Key_Y);
         home_act = new QAction("跳转至开局", this);
         home_act->setShortcut(Qt::Key_Home);
+        home_act->setAutoRepeat(false);
         end_act = new QAction("跳转至局末", this);
         end_act->setShortcut(Qt::Key_End);
+        end_act->setAutoRepeat(false);
 
         review_act = new QAction("复盘模式", this);
         review_act->setCheckable(true);
@@ -85,8 +94,10 @@ class BoardWidget : public QWidget {
 
         export_act = new QAction("导出至剪贴板", this);
         export_act->setShortcut(Qt::CTRL | Qt::Key_C);
+        export_act->setAutoRepeat(false);
         import_act = new QAction("自剪贴板导入", this);
         import_act->setShortcut(Qt::CTRL | Qt::Key_V);
+        import_act->setAutoRepeat(false);
 
         connect(pass_act, &QAction::triggered, this, &BoardWidget::pass);
         connect(undo_act, &QAction::triggered, this, &BoardWidget::undo);
@@ -129,8 +140,9 @@ class BoardWidget : public QWidget {
 
     bool can_close_now() { return game.total_moves() == 0; }
 
-    // Helper methods.
+    /* Helper methods */
   private:
+    /// Converts screen position to game position.
     optional<Point> to_game_pos(QPointF pos) const {
         double x = pos.x() / grid_size - 0.5;
         double y = pos.y() / grid_size - 0.5;
@@ -140,15 +152,36 @@ class BoardWidget : public QWidget {
         return Point(x, y);
     }
 
+    /// Converts game position to screen position.
     QPointF to_screen_pos(Point pos) const {
         return {(pos.x + 1) * grid_size, (pos.y + 1) * grid_size};
     }
 
+    /// Draws a circle at a game position with the given radius.
     void draw_circle(QPainter &p, Point pos, double radius) const {
         p.drawEllipse(to_screen_pos(pos), radius, radius);
     }
 
+    /// Filters the optional so that the contained point
+    /// is unoccupied on the board.
+    optional<Point> filter_unoccupied(optional<Point> p) const {
+        if (p && game.stone_at(*p) != Stone::None)
+            p = nullopt;
+        return p;
+    }
+
+    /// Called when the moves in the game are updated.
+    ///
+    /// Performs the following actions:
+    ///
+    /// - Updates the current stone as inferred from the game,
+    ///   provided that the stone is not locked.
+    /// - Updates the window title.
+    /// - Repaints the widget.
     void game_updated() {
+        if (!stone_locked())
+            stone = game.infer_turn();
+
         usize index = game.move_index(), total = game.total_moves();
         QString index_str =
             index == 0 ? QString("开局") : QString("第 %1 手").arg(index);
@@ -163,29 +196,7 @@ class BoardWidget : public QWidget {
         repaint();
     }
 
-    void import_failed(const QString &text) {
-        QMessageBox box(this);
-        box.setWindowTitle("自剪贴板导入失败");
-        box.setIcon(QMessageBox::Warning);
-        box.setText(text);
-        box.setInformativeText("请检查剪贴板中的文本是否有误。");
-        QPushButton *ok_button = box.addButton("确定", QMessageBox::AcceptRole);
-        box.exec();
-        delete ok_button;
-    }
-
-    void infer_turn() {
-        if (!stone_locked())
-            stone = game.infer_turn();
-    }
-
-    optional<Point> filter_unoccupied(optional<Point> p) const {
-        if (p && game.stone_at(*p) != Stone::None)
-            p = nullopt;
-        return p;
-    }
-
-    // Event handlers.
+    /* Event handlers */
   protected:
     void contextMenuEvent(QContextMenuEvent *event) override {
         QMenu menu(this);
@@ -267,8 +278,8 @@ class BoardWidget : public QWidget {
             for (int i = 0; i < 3; i++) {
                 int text_diameter =
                     std::max(rects[i].width(), rects[i].height());
-                double ratio =
-                    stone_diameter / text_diameter * ORDINAL_SIZE_RATIOS[i];
+                double ratio = stone_diameter / text_diameter *
+                               ORDINAL_FONT_SIZE_RATIOS[i];
                 font_sizes[i] = 64.0 * ratio;
             }
 
@@ -305,6 +316,8 @@ class BoardWidget : public QWidget {
 
     void hoverEvent(QSinglePointEvent *event) {
         auto pos = to_game_pos(event->position());
+        // Repaint iff the tentative move should disappear,
+        // or should appear at or proceed to an unoccupied position.
         bool should_repaint =
             filter_unoccupied(pos) != filter_unoccupied(cursor_pos);
         cursor_pos = pos;
@@ -329,8 +342,6 @@ class BoardWidget : public QWidget {
         if (!game.make_move(*p, stone))
             return;
 
-        if (!stone_locked())
-            stone = opposite(stone);
         game_updated();
     }
 
@@ -342,56 +353,49 @@ class BoardWidget : public QWidget {
             game_updated();
     }
 
-    // Menu slots.
+    /* Menu slots */
   private:
     void pass() {
         stone = opposite(stone);
-        if (filter_unoccupied(cursor_pos))
+        // Repaint iff the tentative move has appeared.
+        if (!reviewing() && filter_unoccupied(cursor_pos))
             repaint();
     }
 
     void undo() {
-        if (game.undo()) {
-            infer_turn();
+        if (game.undo())
             game_updated();
-        }
     }
 
     void redo() {
-        if (game.redo()) {
-            infer_turn();
+        if (game.redo())
             game_updated();
-        }
     }
 
     void home() {
-        if (game.jump(0)) {
-            infer_turn();
+        if (game.jump(0))
             game_updated();
-        }
     }
 
     void end() {
-        if (game.jump(game.total_moves())) {
-            infer_turn();
+        if (game.jump(game.total_moves()))
             game_updated();
-        }
     }
 
     void toggle_review(bool enabled) {
-        // We may have undone or redone moves in `wheelEvent`.
-        if (!enabled)
-            infer_turn();
+        // Repaint iff the tentative move should appear or disappear.
         if (filter_unoccupied(cursor_pos))
             repaint();
     }
 
     void toggle_win_hint(bool enabled) {
+        // Repaint iff the win hint should appear or disappear.
         if (game.first_win())
             repaint();
     }
 
     void toggle_ordinals(bool enabled) {
+        // Repaint iff the ordinals should appear or disappear.
         if (game.move_index() != 0)
             repaint();
     }
@@ -412,9 +416,11 @@ class BoardWidget : public QWidget {
             return import_failed(
                 "合法的五子棋对局 URI 应以 \"gomoku://\" 起始。");
         text.remove(0, URI_PREFIX.size());
-        // Avoid partial copies.
+
+        // This is to avoid partial copying of a URI.
         if (!text.endsWith('/'))
-            return import_failed("合法的五子棋对局 URI 应以 \"/\" 结束。");
+            return import_failed("合法的五子棋对局 URI 除去 \"gomoku://\" "
+                                 "前缀后应以 \"/\" 结束。");
         text.chop(1);
 
         auto data = QByteArray::fromBase64Encoding(
@@ -429,12 +435,26 @@ class BoardWidget : public QWidget {
                                    .arg(res->total_moves()))) {
                 return;
             }
-            game = *std::move(res);
+            if (game != *res) {
+                game = *std::move(res);
+                game_updated();
+            }
             review_act->setChecked(true);
-            game_updated();
         } else {
             import_failed("反序列化失败。");
         }
+    }
+
+    /// Informs the user that the import attempt has failed.
+    void import_failed(const QString &text) {
+        QMessageBox box(this);
+        box.setWindowTitle("自剪贴板导入失败");
+        box.setIcon(QMessageBox::Warning);
+        box.setText(text);
+        box.setInformativeText("请更正剪贴板中的文本后重新尝试导入。");
+        QPushButton *ok_button = box.addButton("确定", QMessageBox::AcceptRole);
+        box.exec();
+        delete ok_button;
     }
 };
 
@@ -460,6 +480,7 @@ int main(int argc, char *argv[]) {
     window.setFixedSize(WINDOW_SIZE, WINDOW_SIZE);
     window.setWindowTitle("五子棋 (开局)");
 #ifndef Q_OS_WIN
+    // Not needed on Windows, as the resource file already does the job.
     window.setWindowIcon(QIcon(":/resources/icon.ico"));
 #endif
     window.show();

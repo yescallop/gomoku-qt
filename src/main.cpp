@@ -97,6 +97,7 @@ class BoardWidget : public QWidget {
         connect(import_act, &QAction::triggered, this,
                 &BoardWidget::import_game);
 
+        // This is required for the shortcuts to work.
         addActions({pass_act, undo_act, redo_act, home_act, end_act, export_act,
                     import_act});
     }
@@ -117,7 +118,7 @@ class BoardWidget : public QWidget {
         delete import_act;
     }
 
-    bool can_close_now() { return game.total() == 0; }
+    bool can_close_now() { return game.total_moves() == 0; }
 
     // Helper methods.
   private:
@@ -130,16 +131,16 @@ class BoardWidget : public QWidget {
         return Point(x, y);
     }
 
-    QPointF to_widget_pos(Point pos) const {
+    QPointF to_screen_pos(Point pos) const {
         return {(pos.x + 1) * grid_size, (pos.y + 1) * grid_size};
     }
 
     void draw_circle(QPainter &p, Point pos, double radius) const {
-        p.drawEllipse(to_widget_pos(pos), radius, radius);
+        p.drawEllipse(to_screen_pos(pos), radius, radius);
     }
 
     void game_updated() {
-        usize index = game.index(), total = game.total();
+        usize index = game.move_index(), total = game.total_moves();
         QString index_str =
             index == 0 ? QString("开局") : QString("第 %1 手").arg(index);
         QString title;
@@ -238,7 +239,7 @@ class BoardWidget : public QWidget {
             p.setPen(QPen(Qt::red, win_hint_width, Qt::DotLine));
 
             auto [start, end] = win->row;
-            p.drawLine(to_widget_pos(start), to_widget_pos(end));
+            p.drawLine(to_screen_pos(start), to_screen_pos(end));
         }
 
         if (shows_ordinals()) {
@@ -263,7 +264,7 @@ class BoardWidget : public QWidget {
 
             for (usize i = 0; i < moves.size(); i++) {
                 auto [pos, val] = moves[i];
-                QPointF wpos = to_widget_pos(pos);
+                QPointF wpos = to_screen_pos(pos);
                 QRectF stone_rect(wpos.x() - stone_radius,
                                   wpos.y() - stone_radius, stone_diameter,
                                   stone_diameter);
@@ -310,10 +311,10 @@ class BoardWidget : public QWidget {
         auto p = to_game_pos(event->position());
         if (!p)
             return;
-        if (game.index() != game.total() &&
-            !confirm(
-                this,
-                QString("覆盖未来的 %1 手棋").arg(game.total() - game.index())))
+
+        auto future = game.future_moves();
+        if (!future.empty() &&
+            !confirm(this, QString("覆盖未来的 %1 手棋").arg(future.size())))
             return;
         if (!game.make_move(*p, stone))
             return;
@@ -361,7 +362,7 @@ class BoardWidget : public QWidget {
     }
 
     void end() {
-        if (game.jump(game.total())) {
+        if (game.jump(game.total_moves())) {
             infer_turn();
             game_updated();
         }
@@ -381,7 +382,7 @@ class BoardWidget : public QWidget {
     }
 
     void toggle_ordinals(bool enabled) {
-        if (game.index() != 0)
+        if (game.move_index() != 0)
             repaint();
     }
 
@@ -400,17 +401,17 @@ class BoardWidget : public QWidget {
             return import_failed(
                 "合法的五子棋对局 URI 应以 \"gomoku://\" 起始。");
 
-        text.remove(0, URI_PREFIX.size());
         auto data = QByteArray::fromBase64Encoding(
-            text, QByteArray::Base64UrlEncoding |
-                      QByteArray::AbortOnBase64DecodingErrors);
+            text.sliced(URI_PREFIX.size()),
+            QByteArray::Base64UrlEncoding |
+                QByteArray::AbortOnBase64DecodingErrors);
         if (!data)
             return import_failed("Base64 解码失败。");
 
         if (auto res = Game::deserialize(*data)) {
-            if (game.total() != 0 &&
+            if (game.total_moves() != 0 &&
                 !confirm(this, QString("导入 %1 手棋并完全覆盖当前对局")
-                                   .arg(res->total()))) {
+                                   .arg(res->total_moves()))) {
                 return;
             }
             game = *std::move(res);

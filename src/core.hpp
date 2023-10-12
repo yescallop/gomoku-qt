@@ -83,14 +83,14 @@ class Board {
     vector<Stone> mat{BOARD_SIZE * BOARD_SIZE};
 
   public:
-    /// Returns a reference to the stone at the point.
+    /// Returns a reference to the stone at a point.
     Stone &at(Point p) {
         if (!in_board(p))
             throw std::out_of_range("point out of board");
         return mat.at(p.y * BOARD_SIZE + p.x);
     }
 
-    /// Returns a const reference to the stone at the point.
+    /// Returns a const reference to the stone at a point.
     const Stone &at(Point p) const {
         if (!in_board(p))
             throw std::out_of_range("point out of board");
@@ -122,7 +122,7 @@ struct Win {
 class Game {
     Board board;
     vector<Move> moves;
-    usize idx = 0;
+    usize index = 0;
     optional<Win> win;
 
     enum CtrlByte : u8 { BEGIN_SEQUENCE = 0xff, END_SEQUENCE = 0xfe };
@@ -130,17 +130,22 @@ class Game {
   public:
     /// Returns the total number of moves, on or off the board,
     /// in the past or in the future.
-    usize total() const { return moves.size(); }
+    usize total_moves() const { return moves.size(); }
 
     /// Returns the current move index.
-    usize index() const { return idx; }
+    usize move_index() const { return index; }
 
     /// Returns a span of moves in the past.
-    span<const Move> past_moves() const { return {moves.data(), idx}; }
+    span<const Move> past_moves() const { return {moves.data(), index}; }
+
+    /// Returns a span of moves in the future.
+    span<const Move> future_moves() const {
+        return {moves.data() + index, moves.size() - index};
+    }
 
     /// Returns the first win witnessed in the past (if any).
     optional<Win> first_win() const {
-        if (win && win->index <= idx)
+        if (win && win->index <= index)
             return win;
         else
             return nullopt;
@@ -156,13 +161,13 @@ class Game {
             return false;
         val = stone;
 
-        moves.resize(idx);
+        moves.resize(index);
         moves.push_back({p, stone});
-        idx += 1;
+        index += 1;
 
-        if (!win || win->index >= idx) {
+        if (!win || win->index >= index) {
             if (auto win_row = find_win_row(p))
-                win = {idx, *win_row};
+                win = {index, *win_row};
             else
                 win = nullopt;
         }
@@ -171,48 +176,48 @@ class Game {
 
     /// Undoes the last move (if any).
     bool undo() {
-        if (idx == 0)
+        if (index == 0)
             return false;
-        idx -= 1;
-        Move last = moves.at(idx);
+        index -= 1;
+        Move last = moves.at(index);
         board.unset(last.pos);
         return true;
     }
 
     /// Redoes the next move (if any).
     bool redo() {
-        if (idx >= total())
+        if (index >= moves.size())
             return false;
-        Move next = moves.at(idx);
-        idx += 1;
+        Move next = moves.at(index);
+        index += 1;
         board.set(next.pos, next.stone);
         return true;
     }
 
-    /// Jumps to the given index by unsetting or resetting moves.
+    /// Jumps to the given move index by undoing or redoing moves.
     bool jump(usize to_index) {
-        if (to_index > total())
+        if (to_index > moves.size())
             throw std::out_of_range("index out of range");
-        if (idx == to_index)
+        if (index == to_index)
             return false;
-        if (idx < to_index) {
-            for (usize i = idx; i < to_index; i++) {
+        if (index < to_index) {
+            for (usize i = index; i < to_index; i++) {
                 Move next = moves.at(i);
                 board.set(next.pos, next.stone);
             }
         } else {
-            for (usize i = idx; i > to_index; i--) {
+            for (usize i = index; i > to_index; i--) {
                 Move last = moves.at(i - 1);
                 board.unset(last.pos);
             }
         }
-        idx = to_index;
+        index = to_index;
         return true;
     }
 
     /// Infers the next stone to play.
     Stone infer_turn() const {
-        return idx == 0 ? Stone::Black : opposite(moves.at(idx - 1).stone);
+        return index == 0 ? Stone::Black : opposite(moves.at(index - 1).stone);
     }
 
     /// Searches for a win row through the point.

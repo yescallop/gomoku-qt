@@ -24,12 +24,8 @@ bool confirm(QWidget *parent, const QString &consequence) {
     box.setIcon(QMessageBox::Question);
     box.setText(QString("这将%1，是否继续操作？").arg(consequence));
 
-    QPushButton *yes_button = new QPushButton(
-        box.style()->standardIcon(QStyle::SP_DialogYesButton), "是", &box);
-    QPushButton *no_button = new QPushButton(
-        box.style()->standardIcon(QStyle::SP_DialogNoButton), "否", &box);
-    box.addButton(yes_button, QMessageBox::YesRole);
-    box.addButton(no_button, QMessageBox::NoRole);
+    QPushButton *yes_button = box.addButton("是", QMessageBox::YesRole);
+    QPushButton *no_button = box.addButton("否", QMessageBox::NoRole);
     box.setDefaultButton(no_button);
     box.exec();
 
@@ -173,10 +169,7 @@ class BoardWidget : public QWidget {
         box.setIcon(QMessageBox::Warning);
         box.setText(text);
         box.setInformativeText("请检查剪贴板中的文本是否有误。");
-
-        QPushButton *ok_button = new QPushButton(
-            box.style()->standardIcon(QStyle::SP_DialogOkButton), "确定", &box);
-        box.addButton(ok_button, QMessageBox::AcceptRole);
+        QPushButton *ok_button = box.addButton("确定", QMessageBox::AcceptRole);
         box.exec();
         delete ok_button;
     }

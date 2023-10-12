@@ -454,7 +454,9 @@ int main(int argc, char *argv[]) {
     window.setCentralWidget(widget);
     window.setFixedSize(WINDOW_SIZE, WINDOW_SIZE);
     window.setWindowTitle("五子棋 (开局)");
+#ifndef Q_OS_WIN
     window.setWindowIcon(QIcon(":/resources/icon.ico"));
+#endif
     window.show();
 
     return app.exec();

@@ -13,6 +13,9 @@ qt_add_resources(gomoku-qt "qt_conf"
     PREFIX "/qt/etc"
     BASE "resources"
     FILES resources/qt.conf)
+qt_add_resources(gomoku-qt "icon"
+    PREFIX "/"
+    FILES resources/icon.ico)
 
 target_link_libraries(gomoku-qt PRIVATE Qt6::Widgets)
 

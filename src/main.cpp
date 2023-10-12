@@ -19,11 +19,24 @@ const Point STAR_POSITIONS[] = {{3, 3}, {3, 11}, {7, 7}, {11, 3}, {11, 11}};
 const QByteArray URI_PREFIX("gomoku://");
 
 bool confirm(QWidget *parent, const QString &consequence) {
-    return QMessageBox::question(
-               parent, "确认操作",
-               QString("这将%1，是否继续操作？").arg(consequence),
-               QMessageBox::Yes | QMessageBox::No,
-               QMessageBox::No) == QMessageBox::Yes;
+    QMessageBox box(parent);
+    box.setWindowTitle("确认操作");
+    box.setIcon(QMessageBox::Question);
+    box.setText(QString("这将%1，是否继续操作？").arg(consequence));
+
+    QPushButton *yes_button = new QPushButton(
+        box.style()->standardIcon(QStyle::SP_DialogYesButton), "是", &box);
+    QPushButton *no_button = new QPushButton(
+        box.style()->standardIcon(QStyle::SP_DialogNoButton), "否", &box);
+    box.addButton(yes_button, QMessageBox::YesRole);
+    box.addButton(no_button, QMessageBox::NoRole);
+    box.setDefaultButton(no_button);
+    box.exec();
+
+    bool ret = box.clickedButton() == yes_button;
+    delete yes_button;
+    delete no_button;
+    return ret;
 }
 
 class BoardWidget : public QWidget {
@@ -160,8 +173,12 @@ class BoardWidget : public QWidget {
         box.setIcon(QMessageBox::Warning);
         box.setText(text);
         box.setInformativeText("请检查剪贴板中的文本是否有误。");
-        box.setStandardButtons(QMessageBox::Ok);
+
+        QPushButton *ok_button = new QPushButton(
+            box.style()->standardIcon(QStyle::SP_DialogOkButton), "确定", &box);
+        box.addButton(ok_button, QMessageBox::AcceptRole);
         box.exec();
+        delete ok_button;
     }
 
     void infer_turn() {
@@ -444,6 +461,7 @@ int main(int argc, char *argv[]) {
     window.setCentralWidget(widget);
     window.setFixedSize(WINDOW_SIZE, WINDOW_SIZE);
     window.setWindowTitle("五子棋 (开局)");
+    window.setWindowIcon(QIcon(":/resources/icon.ico"));
     window.show();
 
     return app.exec();

@@ -26,13 +26,14 @@ enum struct Stone : u8 { None = 0, Black = 1, White = 2 };
 
 /// Returns the opposite stone.
 constexpr Stone opposite(Stone stone) {
-    if (stone == Stone::None)
-        return stone;
-    return Stone(int(stone) ^ 3);
+    switch (stone) {
+    case Stone::Black:
+        return Stone::White;
+    case Stone::White:
+        return Stone::Black;
+    }
+    return Stone::None;
 }
-
-static_assert(opposite(Stone::Black) == Stone::White);
-static_assert(opposite(Stone::White) == Stone::Black);
 
 /// Axes on the board.
 enum struct Axis { Vertical, Ascending, Horizontal, Descending };
@@ -250,15 +251,15 @@ class Game {
             throw std::out_of_range("move index out of range");
         if (index == to_index)
             return false;
-        if (index < to_index) {
-            for (usize i = index; i < to_index; i++) {
-                Move next = moves.at(i);
-                board.set(next.pos, next.stone);
-            }
-        } else {
+        if (index > to_index) {
             for (usize i = index; i > to_index; i--) {
                 Move last = moves.at(i - 1);
                 board.unset(last.pos);
+            }
+        } else {
+            for (usize i = index; i < to_index; i++) {
+                Move next = moves.at(i);
+                board.set(next.pos, next.stone);
             }
         }
         index = to_index;

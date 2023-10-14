@@ -138,6 +138,7 @@ class BoardWidget : public QWidget {
         delete import_act;
     }
 
+    /// Checks if we can close the widget now without user confirmation.
     bool can_close_now() { return game.total_moves() == 0; }
 
     /* Helper methods */
@@ -285,9 +286,9 @@ class BoardWidget : public QWidget {
 
             for (usize i = 0; i < moves.size(); i++) {
                 auto [pos, val] = moves[i];
-                QPointF wpos = to_screen_pos(pos);
-                QRectF stone_rect(wpos.x() - stone_radius,
-                                  wpos.y() - stone_radius, stone_diameter,
+                QPointF screen_pos = to_screen_pos(pos);
+                QRectF stone_rect(screen_pos.x() - stone_radius,
+                                  screen_pos.y() - stone_radius, stone_diameter,
                                   stone_diameter);
 
                 QString ordinal = QString::number(i + 1);
@@ -417,7 +418,7 @@ class BoardWidget : public QWidget {
                 "合法的五子棋对局 URI 应以 \"gomoku://\" 起始。");
         text.remove(0, URI_PREFIX.size());
 
-        // This is to avoid partial copying of a URI.
+        // This is to avoid importing a partially copied URI.
         if (!text.endsWith('/'))
             return import_failed("合法的五子棋对局 URI 除去 \"gomoku://\" "
                                  "前缀后应以 \"/\" 结束。");

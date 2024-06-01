@@ -17,7 +17,7 @@ const double ORDINAL_FONT_SIZE_RATIOS[] = {0.65, 0.75, 0.85};
 
 const Point STAR_POSITIONS[] = {{3, 3}, {3, 11}, {7, 7}, {11, 3}, {11, 11}};
 
-const QByteArray URI_PREFIX("gomoku://");
+const QByteArray URI_PREFIX("gomoku:");
 
 /// Asks the user for confirmation that the consequence is understood.
 bool confirm(QWidget *parent, const QString &consequence) {
@@ -403,9 +403,10 @@ class BoardWidget : public QWidget {
 
     void export_game() {
         QByteArray text = game.serialize()
-                              .toBase64(QByteArray::Base64UrlEncoding)
+                              .toBase64(QByteArray::Base64UrlEncoding |
+                                        QByteArray::OmitTrailingEquals)
                               .prepend(URI_PREFIX)
-                              .append('/');
+                              .append(';');
         QClipboard *clipboard = QApplication::clipboard();
         clipboard->setText(text);
     }
@@ -415,13 +416,12 @@ class BoardWidget : public QWidget {
         QByteArray text = clipboard->text().toUtf8().trimmed();
         if (!text.startsWith(URI_PREFIX))
             return import_failed(
-                "合法的五子棋对局 URI 应以 \"gomoku://\" 起始。");
+                "合法的五子棋对局 URI 应以 \"gomoku:\" 起始。");
         text.remove(0, URI_PREFIX.size());
 
         // This is to avoid importing a partially copied URI.
-        if (!text.endsWith('/'))
-            return import_failed("合法的五子棋对局 URI 除去 \"gomoku://\" "
-                                 "前缀后应以 \"/\" 结束。");
+        if (!text.endsWith(';'))
+            return import_failed("合法的五子棋对局 URI 应以 \";\" 结束。");
         text.chop(1);
 
         auto data = QByteArray::fromBase64Encoding(
